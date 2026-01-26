@@ -1,9 +1,17 @@
 Rails.application.routes.draw do
   get "me/show"
-  namespace :auth do
-    post "register", to: "registrations#create"
-    post "login",    to: "sessions#create"
+  namespace :api do
+    namespace :v1 do
+      resources :conversations
+
+      namespace :auth do
+        post "register", to: "registrations#create"
+        post "login",    to: "sessions#create"
+        get "verify",    to: "sessions#verify"
+      end
+    end
   end
+
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
