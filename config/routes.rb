@@ -2,7 +2,9 @@ Rails.application.routes.draw do
   get "me/show"
   namespace :api do
     namespace :v1 do
-      resources :conversations
+      resources :conversations do
+        resources :messages, only: %i[index create]
+      end
 
       namespace :auth do
         post "register", to: "registrations#create"
