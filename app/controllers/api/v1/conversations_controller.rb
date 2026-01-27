@@ -47,7 +47,7 @@ class Api::V1::ConversationsController < ApplicationController
         params
       end
 
-    raw_params.permit(:title)
+    raw_params.permit(:title, :ai_system_prompt, :ai_model, :ai_api_key)
   end
 
   def conversation_payload(conversation, include_messages: false)
@@ -59,7 +59,13 @@ class Api::V1::ConversationsController < ApplicationController
       updatedAt: conversation.updated_at,
       updated_at: conversation.updated_at,
       lastMessage: last_message&.content,
-      last_message: last_message&.content
+      last_message: last_message&.content,
+      aiSystemPrompt: conversation.ai_system_prompt,
+      ai_system_prompt: conversation.ai_system_prompt,
+      aiModel: conversation.ai_model,
+      ai_model: conversation.ai_model,
+      aiApiKey: conversation.ai_api_key,
+      ai_api_key: conversation.ai_api_key
     }
 
     payload[:messages] = serialized_messages(conversation) if include_messages
