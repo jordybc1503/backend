@@ -8,7 +8,11 @@ module Ai
 
     DEFAULT_BASE_URL = ENV.fetch("AI_BASE_URL", "https://api.openai.com/v1").freeze
     DEFAULT_MODEL = ENV.fetch("AI_DEFAULT_MODEL", "gpt-4o-mini").freeze
-    DEFAULT_SYSTEM_PROMPT = ENV.fetch("AI_DEFAULT_SYSTEM_PROMPT", "You are a helpful assistant.").freeze
+    DEFAULT_SYSTEM_PROMPT = ENV.fetch(
+      "AI_DEFAULT_SYSTEM_PROMPT",
+      "You are a real-time interview assistant. Messages may be labeled as Interviewer or Candidate. " \
+      "Respond with a concise suggested answer the candidate can say next."
+    ).freeze
 
     def initialize(conversation:, api_key: nil)
       @conversation = conversation
@@ -67,13 +71,28 @@ module Ai
       history_messages = conversation.messages.order(:created_at).filter_map do |message|
         next if message.role.blank? || message.content.blank?
 
-        {
-          role: message.role,
-          content: message.content
-        }
+        normalize_message(message)
       end
 
       base_messages + history_messages
+    end
+
+    def normalize_message(message)
+      role = message.role.to_s
+      content = message.content.to_s
+
+      case role
+      when "assistant"
+        { role: "assistant", content: }
+      when "system"
+        { role: "system", content: }
+      when "interviewer"
+        { role: "user", content: "Interviewer: #{content}" }
+      when "user"
+        { role: "user", content: "Candidate: #{content}" }
+      else
+        { role: "user", content: }
+      end
     end
 
     def extract_content(payload)
