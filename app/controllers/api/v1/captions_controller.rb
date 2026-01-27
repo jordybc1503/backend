@@ -35,6 +35,12 @@ class Api::V1::CaptionsController < ApplicationController
       end
     end
 
+    begin
+      Ai::ConversationSummaryService.new(conversation: @conversation).call
+    rescue Ai::ConversationSummaryService::Error => e
+      Rails.logger.warn("[ai-summary] #{e.message}")
+    end
+
     render json: {
       caption_message: message_payload(caption_message),
       assistant_message: assistant_message ? message_payload(assistant_message) : nil,

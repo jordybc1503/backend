@@ -65,7 +65,13 @@ class Api::V1::ConversationsController < ApplicationController
       aiModel: conversation.ai_model,
       ai_model: conversation.ai_model,
       aiApiKey: conversation.ai_api_key,
-      ai_api_key: conversation.ai_api_key
+      ai_api_key: conversation.ai_api_key,
+      aiSummary: conversation.ai_summary,
+      ai_summary: conversation.ai_summary,
+      aiSummaryMessageId: conversation.ai_summary_message_id,
+      ai_summary_message_id: conversation.ai_summary_message_id,
+      aiSummaryUpdatedAt: conversation.ai_summary_updated_at,
+      ai_summary_updated_at: conversation.ai_summary_updated_at
     }
 
     payload[:messages] = serialized_messages(conversation) if include_messages
