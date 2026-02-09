@@ -4,7 +4,11 @@ Rails.application.routes.draw do
     namespace :v1 do
       resources :conversations do
         resources :messages, only: %i[index create]
-        resources :captions, only: %i[create]
+        resources :captions, only: %i[create] do
+          collection do
+            post :stream, to: "captions#create_stream"
+          end
+        end
       end
 
       namespace :auth do

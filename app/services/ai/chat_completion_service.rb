@@ -22,12 +22,22 @@ module Ai
       raise Error, "Missing AI API key" if @api_key.blank?
 
       client = Ai::HttpClient.new(api_key: @api_key)
-      response_payload = client.chat(messages: build_messages, model: @model)
+      response_payload = client.chat(messages: build_messages, model: @model, stream: false)
       content = extract_content(response_payload)
 
       raise Error, "AI returned an empty response" if content.blank?
 
       content
+    rescue Ai::HttpClient::Error => e
+      raise Error, e.message
+    end
+
+    def call_stream(&block)
+      raise Error, "Missing AI API key" if @api_key.blank?
+      raise Error, "Block required for streaming" unless block_given?
+
+      client = Ai::HttpClient.new(api_key: @api_key)
+      client.chat(messages: build_messages, model: @model, stream: true, &block)
     rescue Ai::HttpClient::Error => e
       raise Error, e.message
     end

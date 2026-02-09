@@ -1,4 +1,6 @@
 class Api::V1::CaptionsController < ApplicationController
+  include ActionController::Live
+
   before_action :authorize_request!
   before_action :set_conversation
 
@@ -49,7 +51,109 @@ class Api::V1::CaptionsController < ApplicationController
     }, status: :created
   end
 
+  def create_stream
+    response.headers["Content-Type"] = "text/event-stream"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["X-Accel-Buffering"] = "no"
+    response.headers["Connection"] = "keep-alive"
+
+    text = caption_params[:text].to_s.strip
+    if text.blank?
+      sse_write({ event: "error", data: { errors: ["text is required"] } })
+      return
+    end
+
+    speaker = caption_params[:speaker].to_s.strip.presence || "Interviewer"
+    platform = caption_params[:platform].to_s.strip.presence
+    formatted_text = format_caption_text(text:, speaker:, platform:)
+    message_role = determine_speaker_role(speaker)
+
+    if duplicate_caption?(formatted_text, message_role)
+      sse_write({ event: "skipped", data: { skipped: true } })
+      return
+    end
+
+    caption_message = upsert_caption_message(formatted_text, message_role)
+    sse_write({ event: "caption", data: message_payload(caption_message) })
+
+    # Only trigger AI response when the INTERVIEWER speaks, not when the candidate/user speaks
+    if message_role == "interviewer" && question_like?(text) && ai_throttle_allows?
+      # Try to acquire lock for AI processing - prevents concurrent AI requests
+      lock_key = "ai_lock:conversation:#{@conversation.id}"
+
+      if Rails.cache.read(lock_key)
+        Rails.logger.info("[ai-throttle] AI processing already in progress for conversation #{@conversation.id}")
+        sse_write({ event: "done", data: {} })
+        return
+      end
+
+      begin
+        # Set lock with 30 second expiration (should be enough for any AI response)
+        Rails.cache.write(lock_key, true, expires_in: 30.seconds)
+
+        accumulated_content = ""
+        temp_message_id = SecureRandom.uuid
+
+        sse_write({
+          event: "assistant_start",
+          data: { messageId: temp_message_id, role: "assistant" }
+        })
+
+        service = Ai::ChatCompletionService.new(conversation: @conversation)
+        service.call_stream do |chunk|
+          accumulated_content += chunk
+          sse_write({
+            event: "assistant_chunk",
+            data: { messageId: temp_message_id, chunk: chunk }
+          })
+        end
+
+        if accumulated_content.present?
+          assistant_message = @conversation.messages.create!(
+            user: current_user,
+            role: "assistant",
+            content: accumulated_content,
+            status: "suggestion"
+          )
+
+          sse_write({
+            event: "assistant_complete",
+            data: message_payload(assistant_message)
+          })
+        end
+      rescue Ai::ChatCompletionService::Error => e
+        sse_write({ event: "error", data: { error: e.message } })
+      ensure
+        # Always release lock
+        Rails.cache.delete(lock_key)
+      end
+    end
+
+    begin
+      Ai::ConversationSummaryService.new(conversation: @conversation).call
+    rescue Ai::ConversationSummaryService::Error => e
+      Rails.logger.warn("[ai-summary] #{e.message}")
+    end
+
+    sse_write({ event: "done", data: {} })
+  rescue StandardError => e
+    Rails.logger.error("[captions-stream] #{e.message}")
+    sse_write({ event: "error", data: { error: "Internal server error" } }) rescue nil
+  ensure
+    response.stream.close rescue nil
+  end
+
   private
+
+  def sse_write(payload)
+    event_name = payload[:event] || "message"
+    data = payload[:data] || {}
+    response.stream.write("event: #{event_name}\n")
+    response.stream.write("data: #{data.to_json}\n\n")
+    # Note: ActionController::Live::Buffer writes immediately, no flush needed
+  rescue IOError
+    # Client disconnected
+  end
 
   def set_conversation
     @conversation = current_user.conversations.includes(:messages).find(params[:conversation_id])

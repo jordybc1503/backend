@@ -13,9 +13,19 @@ module Ai
       @base_url = base_url
     end
 
-    def chat(messages:, model:, temperature: nil)
+    def chat(messages:, model:, temperature: nil, stream: false, &block)
       raise Error, "Missing AI API key" if @api_key.blank?
 
+      if stream
+        chat_stream(messages:, model:, temperature:, &block)
+      else
+        chat_non_stream(messages:, model:, temperature:)
+      end
+    end
+
+    private
+
+    def chat_non_stream(messages:, model:, temperature:)
       uri = URI.parse("#{@base_url}/chat/completions")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
@@ -23,7 +33,7 @@ module Ai
       request = Net::HTTP::Post.new(uri.request_uri)
       request["Authorization"] = "Bearer #{@api_key}"
       request["Content-Type"] = "application/json"
-      request.body = build_body(messages:, model:, temperature:).to_json
+      request.body = build_body(messages:, model:, temperature:, stream: false).to_json
 
       response = http.request(request)
 
@@ -36,12 +46,60 @@ module Ai
       raise Error, "Unable to parse AI response: #{e.message}"
     end
 
-    private
+    def chat_stream(messages:, model:, temperature:, &block)
+      uri = URI.parse("#{@base_url}/chat/completions")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == "https"
+      http.read_timeout = 60
 
-    def build_body(messages:, model:, temperature:)
+      request = Net::HTTP::Post.new(uri.request_uri)
+      request["Authorization"] = "Bearer #{@api_key}"
+      request["Content-Type"] = "application/json"
+      request.body = build_body(messages:, model:, temperature:, stream: true).to_json
+
+      http.request(request) do |response|
+        unless response.is_a?(Net::HTTPSuccess)
+          raise Error, "AI stream request failed with status #{response.code}"
+        end
+
+        buffer = ""
+        response.read_body do |chunk|
+          # Add chunk to buffer
+          buffer += chunk
+
+          # Process complete lines (split on any newline, keeping empty lines)
+          while buffer.include?("\n")
+            line, buffer = buffer.split("\n", 2)
+            line = line.strip
+
+            # Skip empty lines
+            next if line.empty?
+
+            # SSE format: "data: {...}" or just the event marker "data: [DONE]"
+            if line.start_with?("data: ")
+              data = line[6..].strip  # Remove "data: " prefix
+              next if data == "[DONE]"
+
+              begin
+                parsed = JSON.parse(data)
+                delta = parsed.dig("choices", 0, "delta", "content")
+                block.call(delta) if delta && block
+              rescue JSON::ParserError => e
+                Rails.logger.warn("[ai-stream] Failed to parse chunk: #{data[0..100]}")
+              end
+            end
+          end
+        end
+      end
+    rescue => e
+      raise Error, "Stream error: #{e.message}"
+    end
+
+    def build_body(messages:, model:, temperature:, stream: false)
       body = {
         model: model,
-        messages: messages
+        messages: messages,
+        stream: stream
       }
 
       body[:temperature] = temperature if temperature
