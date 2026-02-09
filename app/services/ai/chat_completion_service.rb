@@ -49,6 +49,10 @@ module Ai
     def build_messages
       base_messages = []
       base_messages << { role: "system", content: @system_prompt } if @system_prompt.present?
+
+      profile_message = profile_system_message
+      base_messages << profile_message if profile_message
+
       summary_message = summary_system_message
       base_messages << summary_message if summary_message
 
@@ -59,6 +63,16 @@ module Ai
       end
 
       base_messages + history_messages
+    end
+
+    def profile_system_message
+      user = conversation.user
+      return nil if user.blank? || user.profile_text.blank?
+
+      {
+        role: "system",
+        content: "Candidate profile and background:\n#{user.profile_text}"
+      }
     end
 
     def summary_system_message

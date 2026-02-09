@@ -1,7 +1,9 @@
 Rails.application.routes.draw do
-  get "me/show"
   namespace :api do
     namespace :v1 do
+      resource :me, only: [:show, :update], controller: "me"
+      resource :profile, only: [:show, :update], controller: "profile"
+
       resources :conversations do
         resources :messages, only: %i[index create]
         resources :captions, only: %i[create] do

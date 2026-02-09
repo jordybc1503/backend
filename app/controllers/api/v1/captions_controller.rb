@@ -225,9 +225,11 @@ class Api::V1::CaptionsController < ApplicationController
     normalized = text.downcase.strip
 
     patterns = [
-      /\b(can you|could you|would you|tell me|explain|how|what|why|when|where)\b/,
-      /\b(walk me through|describe|give me an example|share an example)\b/,
-      /\b(puedes|podrias|podrías|como|cómo|que|qué|por que|por qué|cuando|cuándo|donde|dónde)\b/
+      /\b(can you|could you|would you|tell me|explain|how|what|why|when|where|who|which)\b/,
+      /\b(walk me through|describe|give me an example|share an example|do you|are you|is there|are there)\b/,
+      /\b(puedes|podrias|podrías|como|cómo|que|qué|por que|por qué|cuando|cuándo|donde|dónde|quien|quién|cual|cuál)\b/,
+      /\b(explica|explicame|explícame|describe|describeme|descríbeme|dime|dimé|cuéntame|cuentame|háblame|hablame)\b/,
+      /\b(muéstrame|muestrame|ayúdame|ayudame|necesito|quiero saber)\b/
     ]
 
     patterns.any? { |pattern| normalized.match?(pattern) }
