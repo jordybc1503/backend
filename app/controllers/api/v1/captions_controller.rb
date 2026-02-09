@@ -11,12 +11,13 @@ class Api::V1::CaptionsController < ApplicationController
     speaker = caption_params[:speaker].to_s.strip.presence || "Interviewer"
     platform = caption_params[:platform].to_s.strip.presence
     formatted_text = format_caption_text(text:, speaker:, platform:)
+    message_role = determine_speaker_role(speaker)
 
-    if duplicate_caption?(formatted_text)
+    if duplicate_caption?(formatted_text, message_role)
       return render json: { skipped: true }, status: :ok
     end
 
-    caption_message = upsert_caption_message(formatted_text)
+    caption_message = upsert_caption_message(formatted_text, message_role)
 
     assistant_message = nil
     assistant_error = nil
@@ -70,16 +71,23 @@ class Api::V1::CaptionsController < ApplicationController
     "#{speaker_label}: #{text}"
   end
 
-  def duplicate_caption?(formatted_text)
-    last_interviewer_message = last_interviewer_message()
-    return false unless last_interviewer_message
-    return false unless last_interviewer_message.content == formatted_text
+  def determine_speaker_role(speaker)
+    normalized = speaker.to_s.downcase.strip
+    candidate_markers = ["you", "tú", "tu", "yo", "me"]
 
-    last_interviewer_message.updated_at > 6.seconds.ago
+    candidate_markers.any? { |marker| normalized == marker } ? "user" : "interviewer"
   end
 
-  def upsert_caption_message(formatted_text)
-    last_message = last_interviewer_message()
+  def duplicate_caption?(formatted_text, role)
+    last_message = last_message_by_role(role)
+    return false unless last_message
+    return false unless last_message.content == formatted_text
+
+    last_message.updated_at > 6.seconds.ago
+  end
+
+  def upsert_caption_message(formatted_text, role)
+    last_message = last_message_by_role(role)
 
     if last_message && last_message.created_at > 15.seconds.ago
       return last_message if last_message.content == formatted_text
@@ -89,15 +97,15 @@ class Api::V1::CaptionsController < ApplicationController
     else
       @conversation.messages.create!(
         user: current_user,
-        role: "interviewer",
+        role: role,
         content: formatted_text,
         status: "captured"
       )
     end
   end
 
-  def last_interviewer_message
-    @conversation.messages.where(role: "interviewer").order(created_at: :desc).first
+  def last_message_by_role(role)
+    @conversation.messages.where(role: role).order(created_at: :desc).first
   end
 
   def ai_throttle_allows?
