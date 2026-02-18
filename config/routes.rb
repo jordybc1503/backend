@@ -5,6 +5,10 @@ Rails.application.routes.draw do
       resource :profile, only: [:show, :update], controller: "profile"
 
       resources :conversations do
+        member do
+          get :report
+        end
+
         resources :messages, only: %i[index create]
         resources :captions, only: %i[create] do
           collection do

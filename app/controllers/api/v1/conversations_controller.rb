@@ -1,6 +1,6 @@
 class Api::V1::ConversationsController < ApplicationController
   before_action :authorize_request!
-  before_action :set_conversation, only: %i[show update destroy]
+  before_action :set_conversation, only: %i[show update destroy report]
 
   def index
     conversations = current_user.conversations.includes(:messages).order(updated_at: :desc)
@@ -31,6 +31,16 @@ class Api::V1::ConversationsController < ApplicationController
   def destroy
     @conversation.destroy
     head :no_content
+  end
+
+  def report
+    report = Conversations::MessagesReportService.new(conversation: @conversation).call
+
+    send_data(
+      report[:content],
+      type: "text/plain; charset=utf-8",
+      disposition: %(attachment; filename="#{report[:filename]}")
+    )
   end
 
   private
