@@ -1,6 +1,10 @@
 class Api::V1::CaptionsController < ApplicationController
   include ActionController::Live
 
+  AUTO_RESPONSE_MODE = "auto".freeze
+  MANUAL_LAST_INTERVIEWER_MODE = "manual_last_interviewer".freeze
+  CAPTION_UPSERT_WINDOW = 90.seconds
+
   before_action :authorize_request!
   before_action :set_conversation
 
@@ -24,7 +28,11 @@ class Api::V1::CaptionsController < ApplicationController
     assistant_message = nil
     assistant_error = nil
 
-    if question_like?(text) && ai_throttle_allows?
+    if auto_response_enabled? &&
+         message_role == "interviewer" &&
+         question_like?(text) &&
+         ai_throttle_allows? &&
+         !assistant_already_suggested_for_caption?(caption_message)
       begin
         assistant_content = Ai::ChatCompletionService.new(conversation: @conversation).call
         assistant_message = @conversation.messages.create!(
@@ -77,7 +85,11 @@ class Api::V1::CaptionsController < ApplicationController
     sse_write({ event: "caption", data: message_payload(caption_message) })
 
     # Only trigger AI response when the INTERVIEWER speaks, not when the candidate/user speaks
-    if message_role == "interviewer" && question_like?(text) && ai_throttle_allows?
+    if auto_response_enabled? &&
+         message_role == "interviewer" &&
+         question_like?(text) &&
+         ai_throttle_allows? &&
+         !assistant_already_suggested_for_caption?(caption_message)
       # Try to acquire lock for AI processing - prevents concurrent AI requests
       lock_key = "ai_lock:conversation:#{@conversation.id}"
 
@@ -167,7 +179,7 @@ class Api::V1::CaptionsController < ApplicationController
         params
       end
 
-    raw_params.permit(:text, :speaker, :platform, :timestamp)
+    raw_params.permit(:text, :speaker, :platform, :timestamp, :response_mode)
   end
 
   def format_caption_text(text:, speaker:, platform:)
@@ -193,7 +205,7 @@ class Api::V1::CaptionsController < ApplicationController
   def upsert_caption_message(formatted_text, role)
     last_message = last_message_by_role(role)
 
-    if last_message && last_message.created_at > 15.seconds.ago
+    if should_update_last_caption?(last_message, formatted_text)
       return last_message if last_message.content == formatted_text
 
       last_message.update!(content: formatted_text, status: "captured")
@@ -210,6 +222,35 @@ class Api::V1::CaptionsController < ApplicationController
 
   def last_message_by_role(role)
     @conversation.messages.where(role: role).order(created_at: :desc).first
+  end
+
+  def should_update_last_caption?(last_message, formatted_text)
+    return false unless last_message
+    return false unless last_message.created_at > CAPTION_UPSERT_WINDOW.ago
+
+    incremental_caption_update?(last_message.content, formatted_text)
+  end
+
+  def incremental_caption_update?(previous_text, next_text)
+    previous = normalized_caption_body(previous_text)
+    nxt = normalized_caption_body(next_text)
+    return false if previous.blank? || nxt.blank?
+
+    return true if nxt.start_with?(previous) || previous.start_with?(nxt)
+
+    max_prefix = [previous.length, nxt.length].min
+    return false if max_prefix.zero?
+
+    common_prefix_length = 0
+    while common_prefix_length < max_prefix && previous[common_prefix_length] == nxt[common_prefix_length]
+      common_prefix_length += 1
+    end
+
+    common_prefix_length >= (max_prefix * 0.6).floor
+  end
+
+  def normalized_caption_body(text)
+    text.to_s.split(":", 2).last.to_s.downcase.gsub(/\s+/, " ").strip
   end
 
   def ai_throttle_allows?
@@ -233,6 +274,22 @@ class Api::V1::CaptionsController < ApplicationController
     ]
 
     patterns.any? { |pattern| normalized.match?(pattern) }
+  end
+
+  def response_mode
+    raw = caption_params[:response_mode].to_s
+    raw == MANUAL_LAST_INTERVIEWER_MODE ? MANUAL_LAST_INTERVIEWER_MODE : AUTO_RESPONSE_MODE
+  end
+
+  def auto_response_enabled?
+    response_mode == AUTO_RESPONSE_MODE
+  end
+
+  def assistant_already_suggested_for_caption?(caption_message)
+    @conversation.messages
+                 .where(role: "assistant", status: "suggestion")
+                 .where("created_at >= ?", caption_message.created_at)
+                 .exists?
   end
 
   def message_payload(message)

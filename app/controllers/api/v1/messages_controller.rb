@@ -47,6 +47,35 @@ class Api::V1::MessagesController < ApplicationController
     end
   end
 
+  def respond_last_interviewer
+    lock_key = "ai_lock:conversation:#{@conversation.id}"
+    if Rails.cache.read(lock_key)
+      return render json: { error: "Ya hay una respuesta de IA en progreso." }, status: :too_many_requests
+    end
+
+    Rails.cache.write(lock_key, true, expires_in: 30.seconds)
+
+    result = Ai::LastInterviewerResponseService.new(conversation: @conversation, user: current_user).call
+
+    begin
+      Ai::ConversationSummaryService.new(conversation: @conversation).call
+    rescue Ai::ConversationSummaryService::Error => e
+      Rails.logger.warn("[ai-summary] #{e.message}")
+    end
+
+    render json: {
+      assistant_message: message_payload(result[:assistant_message]),
+      skipped: result[:skipped],
+      interviewer_message_id: result[:interviewer_message]&.id
+    }, status: :ok
+  rescue Ai::LastInterviewerResponseService::NoInterviewerMessageError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue Ai::LastInterviewerResponseService::Error => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  ensure
+    Rails.cache.delete(lock_key) if defined?(lock_key)
+  end
+
   private
 
   def set_conversation

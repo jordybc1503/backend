@@ -9,7 +9,11 @@ Rails.application.routes.draw do
           get :report
         end
 
-        resources :messages, only: %i[index create]
+        resources :messages, only: %i[index create] do
+          collection do
+            post :respond_last_interviewer
+          end
+        end
         resources :captions, only: %i[create] do
           collection do
             post :stream, to: "captions#create_stream"
